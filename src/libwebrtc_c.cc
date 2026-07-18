@@ -111,6 +111,8 @@ struct lwrtc_peer {
   void* ice_user = nullptr;
   lwrtc_data_channel_cb data_channel_cb = nullptr;
   void* data_channel_user = nullptr;
+  lwrtc_peer_connection_state_cb pc_state_cb = nullptr;
+  void* pc_state_user = nullptr;
 };
 
 struct lwrtc_audio_source {
@@ -182,7 +184,18 @@ class PeerObserver final : public libwebrtc::RTCPeerConnectionObserver {
   explicit PeerObserver(lwrtc_peer* peer) : peer_(peer) {}
 
   void OnSignalingState(libwebrtc::RTCSignalingState) override {}
-  void OnPeerConnectionState(libwebrtc::RTCPeerConnectionState) override {}
+  void OnPeerConnectionState(libwebrtc::RTCPeerConnectionState state) override {
+    // Forward the standardized peer-connection-state transition to a wrapper
+    // consumer if one is registered. libwebrtc emits Failed after ICE
+    // consent-freshness lapses per RFC 7675 (~15s default) when the remote
+    // peer becomes unreachable, and Closed on explicit teardown. Without
+    // this forwarder the signal was discarded — downstream projects had
+    // no way to observe peer death and could not release captured
+    // resources tied to the session lifetime.
+    if (peer_ && peer_->pc_state_cb) {
+      peer_->pc_state_cb(peer_->pc_state_user, static_cast<int>(state));
+    }
+  }
   void OnIceGatheringState(libwebrtc::RTCIceGatheringState) override {}
   void OnIceConnectionState(libwebrtc::RTCIceConnectionState) override {}
 
@@ -453,6 +466,17 @@ void lwrtc_peer_release(lwrtc_peer_t* peer) {
   }
   peer->observer.reset();
   delete peer;
+}
+
+void lwrtc_peer_set_connection_state_cb(
+    lwrtc_peer_t* peer,
+    void* user,
+    lwrtc_peer_connection_state_cb cb) {
+  if (!peer) {
+    return;
+  }
+  peer->pc_state_cb = cb;
+  peer->pc_state_user = user;
 }
 
 void lwrtc_peer_set_remote_description(

@@ -37,6 +37,12 @@ typedef void (*lwrtc_ice_cb)(
     const char* mid,
     int mline_index,
     const char* candidate);
+// Fires when the RTCPeerConnection state transitions. The `state` value
+// matches the RTCPeerConnectionState enum in rtc_peerconnection.h —
+// {Failed, Closed} indicate the peer will not recover and callers should
+// tear down the session (input capture, media pipelines, etc.). Wired
+// through the observer at lwrtc_peer_set_connection_state_cb.
+typedef void (*lwrtc_peer_connection_state_cb)(void* user, int state);
 typedef void (*lwrtc_data_channel_cb)(void* user, lwrtc_data_channel_t* channel);
 typedef void (*lwrtc_data_channel_state_cb)(void* user, int state);
 typedef void (*lwrtc_data_channel_message_cb)(
@@ -107,6 +113,16 @@ LIB_WEBRTC_API lwrtc_peer_t* lwrtc_factory_create_peer(
 
 LIB_WEBRTC_API void lwrtc_peer_close(lwrtc_peer_t* peer);
 LIB_WEBRTC_API void lwrtc_peer_release(lwrtc_peer_t* peer);
+
+// Register a callback fired on RTCPeerConnection state changes. libwebrtc
+// transitions the state to Failed after ICE consent-freshness lapses per
+// RFC 7675 (~15s default) when the remote peer is unreachable, and to
+// Closed on explicit teardown. Passing cb=nullptr clears the registration.
+// Safe to call multiple times; last registration wins.
+LIB_WEBRTC_API void lwrtc_peer_set_connection_state_cb(
+    lwrtc_peer_t* peer,
+    void* user,
+    lwrtc_peer_connection_state_cb cb);
 
 LIB_WEBRTC_API void lwrtc_peer_set_remote_description(
     lwrtc_peer_t* peer,
