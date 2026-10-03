@@ -95,6 +95,30 @@ LIB_WEBRTC_API int lwrtc_factory_set_passthrough_av1_params(
 LIB_WEBRTC_API int lwrtc_factory_set_passthrough_hevc_fmtp(
     lwrtc_factory_t* factory,
     const char* fmtp);
+// Build the factory over webrtc's dummy audio device instead of the platform
+// one (Windows Core Audio): no audio endpoint is opened at initialization or
+// when an audio stream is added. For a caller that plays nothing and pushes
+// its own captured audio through lwrtc_audio_source_push.
+// Must be called BEFORE lwrtc_factory_initialize().
+LIB_WEBRTC_API int lwrtc_factory_use_dummy_audio_device(
+    lwrtc_factory_t* factory);
+
+// How long each step of lwrtc_factory_initialize() took, in microseconds.
+// A step the initialization skipped is 0 (ssl_us after the first factory of
+// the process).
+typedef struct lwrtc_factory_init_timings {
+  int64_t ssl_us;
+  int64_t threads_us;
+  int64_t audio_device_create_us;
+  int64_t audio_device_init_us;
+  int64_t audio_processing_us;
+  int64_t peer_connection_factory_us;
+} lwrtc_factory_init_timings_t;
+// Fills `timings` for a factory lwrtc_factory_initialize() built. Returns 0,
+// leaving `timings` untouched, when the factory is not initialized.
+LIB_WEBRTC_API int lwrtc_factory_get_init_timings(
+    const lwrtc_factory_t* factory,
+    lwrtc_factory_init_timings_t* timings);
 LIB_WEBRTC_API void lwrtc_factory_release(lwrtc_factory_t* factory);
 
 LIB_WEBRTC_API lwrtc_constraints_t* lwrtc_constraints_create();
