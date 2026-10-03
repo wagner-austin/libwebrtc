@@ -79,7 +79,8 @@ LIB_WEBRTC_API int lwrtc_factory_initialize(lwrtc_factory_t* factory);
 // Enable passthrough mode for the factory.
 // Must be called BEFORE lwrtc_factory_initialize().
 // When enabled, the factory will use the PassthroughVideoEncoder
-// which accepts pre-encoded H.264/HEVC/AV1 frames.
+// which accepts pre-encoded H.264/HEVC/AV1 frames, and webrtc's builtin
+// video decoder factory instead of the Intel Media SDK one.
 LIB_WEBRTC_API int lwrtc_factory_enable_passthrough(
     lwrtc_factory_t* factory,
     lwrtc_video_codec_t codec);
@@ -95,14 +96,6 @@ LIB_WEBRTC_API int lwrtc_factory_set_passthrough_av1_params(
 LIB_WEBRTC_API int lwrtc_factory_set_passthrough_hevc_fmtp(
     lwrtc_factory_t* factory,
     const char* fmtp);
-// Build the factory over webrtc's dummy audio device instead of the platform
-// one (Windows Core Audio): no audio endpoint is opened at initialization or
-// when an audio stream is added. For a caller that plays nothing and pushes
-// its own captured audio through lwrtc_audio_source_push.
-// Must be called BEFORE lwrtc_factory_initialize().
-LIB_WEBRTC_API int lwrtc_factory_use_dummy_audio_device(
-    lwrtc_factory_t* factory);
-
 // How long each step of lwrtc_factory_initialize() took, in microseconds.
 // A step the initialization skipped is 0 (ssl_us after the first factory of
 // the process).
