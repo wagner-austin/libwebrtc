@@ -17,6 +17,7 @@
 #include "api/video_codecs/sdp_video_format.h"
 #include "base/refcountedobject.h"
 #include "rtc_base/ref_counted_object.h"
+#include "rtc_base/time_utils.h"
 #include "libwebrtc.h"
 #include "rtc_ice_candidate.h"
 #include "rtc_mediaconstraints.h"
@@ -94,6 +95,9 @@ struct lwrtc_factory {
   owt::base::PassthroughVideoEncoderFactory* passthrough_factory = nullptr;
   lwrtc_video_codec_t passthrough_codec = LWRTC_VIDEO_CODEC_H264;
   bool use_passthrough = false;
+  bool use_dummy_audio_device = false;
+  // LibWebRTC::Initialize() inside lwrtc_factory_initialize().
+  int64_t ssl_us = 0;
   std::optional<webrtc::CodecParameterMap> hevc_parameters;
   std::optional<std::string> av1_profile;
   std::optional<std::string> av1_level_idx;
@@ -266,12 +270,19 @@ int lwrtc_factory_initialize(lwrtc_factory_t* factory) {
   if (factory->handle) {
     return 1;
   }
+  const int64_t ssl_start_us = rtc::TimeMicros();
   if (!libwebrtc::LibWebRTC::Initialize()) {
     return 0;
   }
+  factory->ssl_us = rtc::TimeMicros() - ssl_start_us;
   factory->handle = libwebrtc::LibWebRTC::CreateRTCPeerConnectionFactory();
   if (!factory->handle) {
     return 0;
+  }
+
+  if (factory->use_dummy_audio_device) {
+    static_cast<libwebrtc::RTCPeerConnectionFactoryImpl*>(factory->handle.get())
+        ->UseDummyAudioDevice();
   }
 
   // If passthrough mode is enabled, set the custom encoder factory
@@ -325,6 +336,37 @@ int lwrtc_factory_enable_passthrough(
   }
   factory->use_passthrough = true;
   factory->passthrough_codec = codec;
+  return 1;
+}
+
+int lwrtc_factory_use_dummy_audio_device(lwrtc_factory_t* factory) {
+  if (!factory) {
+    return 0;
+  }
+  if (factory->handle) {
+    // Already initialized - the audio device is chosen at initialization
+    return 0;
+  }
+  factory->use_dummy_audio_device = true;
+  return 1;
+}
+
+int lwrtc_factory_get_init_timings(
+    const lwrtc_factory_t* factory,
+    lwrtc_factory_init_timings_t* timings) {
+  if (!factory || !factory->handle || !timings) {
+    return 0;
+  }
+  const auto& steps =
+      static_cast<const libwebrtc::RTCPeerConnectionFactoryImpl*>(
+          factory->handle.get())
+          ->initialize_timings();
+  timings->ssl_us = factory->ssl_us;
+  timings->threads_us = steps.threads_us;
+  timings->audio_device_create_us = steps.audio_device_create_us;
+  timings->audio_device_init_us = steps.audio_device_init_us;
+  timings->audio_processing_us = steps.audio_processing_us;
+  timings->peer_connection_factory_us = steps.peer_connection_factory_us;
   return 1;
 }
 

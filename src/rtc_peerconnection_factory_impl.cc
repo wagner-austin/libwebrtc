@@ -9,7 +9,9 @@
 #include "api/video_codecs/builtin_video_decoder_factory.h"
 #include "api/video_codecs/builtin_video_encoder_factory.h"
 #include "modules/audio_device/audio_device_impl.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/ref_counted_object.h"
+#include "rtc_base/time_utils.h"
 #include "rtc_audio_source_impl.h"
 #include "rtc_media_stream_impl.h"
 #include "rtc_mediaconstraints_impl.h"
@@ -51,6 +53,8 @@ RTCPeerConnectionFactoryImpl::RTCPeerConnectionFactoryImpl() {}
 RTCPeerConnectionFactoryImpl::~RTCPeerConnectionFactoryImpl() {}
 
 bool RTCPeerConnectionFactoryImpl::Initialize() {
+  initialize_timings_ = InitializeTimings {};
+  const int64_t threads_start_us = rtc::TimeMicros();
   worker_thread_ = rtc::Thread::Create();
   worker_thread_->SetName("worker_thread", nullptr);
   RTC_CHECK(worker_thread_->Start()) << "Failed to start thread";
@@ -62,18 +66,48 @@ bool RTCPeerConnectionFactoryImpl::Initialize() {
   network_thread_ = rtc::Thread::CreateWithSocketServer();
   network_thread_->SetName("network_thread", nullptr);
   RTC_CHECK(network_thread_->Start()) << "Failed to start thread";
+  initialize_timings_.threads_us = rtc::TimeMicros() - threads_start_us;
   if (!audio_device_module_) {
     task_queue_factory_ = webrtc::CreateDefaultTaskQueueFactory();
+    const int64_t create_start_us = rtc::TimeMicros();
     worker_thread_->BlockingCall([&] { CreateAudioDeviceModule_w(); });
+    initialize_timings_.audio_device_create_us =
+        rtc::TimeMicros() - create_start_us;
+    if (!audio_device_module_) {
+      RTC_LOG(LS_ERROR) << "Failed to create the audio device module (layer "
+                        << static_cast<int>(audio_layer_) << ")";
+      Terminate();
+      return false;
+    }
+    // The media engine initializes the device again inside
+    // CreatePeerConnectionFactory, where a failure is an RTC_CHECK; done here
+    // first, its cost is measured on its own and a failure returns false.
+    // A second Init() on an initialized device returns 0 at once.
+    const int64_t init_start_us = rtc::TimeMicros();
+    const int32_t init_result = worker_thread_->BlockingCall(
+        [this] { return audio_device_module_->Init(); });
+    initialize_timings_.audio_device_init_us =
+        rtc::TimeMicros() - init_start_us;
+    if (init_result != 0) {
+      RTC_LOG(LS_ERROR) << "Failed to initialize the audio device module "
+                        << "(layer " << static_cast<int>(audio_layer_)
+                        << "): " << init_result;
+      Terminate();
+      return false;
+    }
   }
 
   if (!audio_processing_impl_) {
+    const int64_t processing_start_us = rtc::TimeMicros();
     worker_thread_->BlockingCall([this] {
       audio_processing_impl_ = new RefCountedObject<RTCAudioProcessingImpl>();
     });
+    initialize_timings_.audio_processing_us =
+        rtc::TimeMicros() - processing_start_us;
   }
 
   if (!rtc_peerconnection_factory_) {
+    const int64_t factory_start_us = rtc::TimeMicros();
     // Determine which video encoder factory to use
     std::unique_ptr<webrtc::VideoEncoderFactory> encoder_factory;
     if (custom_encoder_factory_) {
@@ -102,6 +136,8 @@ bool RTCPeerConnectionFactoryImpl::Initialize() {
         webrtc::CreateBuiltinAudioDecoderFactory(),
         std::move(encoder_factory), std::move(decoder_factory),
         nullptr, audio_processing_impl_->GetAudioProcessing(), nullptr, nullptr);
+    initialize_timings_.peer_connection_factory_us =
+        rtc::TimeMicros() - factory_start_us;
   }
 
   if (!rtc_peerconnection_factory_.get()) {
@@ -129,8 +165,7 @@ bool RTCPeerConnectionFactoryImpl::Terminate() {
 void RTCPeerConnectionFactoryImpl::CreateAudioDeviceModule_w() {
   if (!audio_device_module_)
     audio_device_module_ = webrtc::AudioDeviceModule::Create(
-        webrtc::AudioDeviceModule::kPlatformDefaultAudio,
-        task_queue_factory_.get());
+        audio_layer_, task_queue_factory_.get());
 }
 
 void RTCPeerConnectionFactoryImpl::DestroyAudioDeviceModule_w() {
@@ -396,6 +431,10 @@ void RTCPeerConnectionFactoryImpl::SetVideoEncoderFactory(
 
 webrtc::VideoEncoderFactory* RTCPeerConnectionFactoryImpl::GetVideoEncoderFactory() {
   return custom_encoder_factory_ptr_;
+}
+
+void RTCPeerConnectionFactoryImpl::UseDummyAudioDevice() {
+  audio_layer_ = webrtc::AudioDeviceModule::kDummyAudio;
 }
 
 }  // namespace libwebrtc

@@ -1,6 +1,7 @@
 #ifndef LIB_WEBRTC_MEDIA_SESSION_FACTORY_IMPL_HXX
 #define LIB_WEBRTC_MEDIA_SESSION_FACTORY_IMPL_HXX
 
+#include <cstdint>
 #include <memory>
 
 #include "api/audio_options.h"
@@ -8,6 +9,7 @@
 #include "api/peer_connection_interface.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
+#include "modules/audio_device/include/audio_device.h"
 #include "rtc_audio_device_impl.h"
 #include "rtc_audio_processing_impl.h"
 #include "rtc_base/thread.h"
@@ -90,6 +92,27 @@ class RTCPeerConnectionFactoryImpl : public RTCPeerConnectionFactory {
   // Get the custom video encoder factory (if set).
   webrtc::VideoEncoderFactory* GetVideoEncoderFactory();
 
+  // Builds the factory over webrtc's dummy audio device instead of the
+  // platform one (Windows Core Audio), for a caller that plays nothing and
+  // pushes its own captured audio through a kCustom audio source. The dummy
+  // device opens no audio endpoint, at Initialize() or when an audio stream
+  // is added. Must be called before Initialize().
+  void UseDummyAudioDevice();
+
+  // How long each step of Initialize() took, in microseconds. All zero until
+  // Initialize() has run; a step Initialize() skipped stays zero.
+  struct InitializeTimings {
+    int64_t threads_us = 0;
+    int64_t audio_device_create_us = 0;
+    int64_t audio_device_init_us = 0;
+    int64_t audio_processing_us = 0;
+    int64_t peer_connection_factory_us = 0;
+  };
+
+  const InitializeTimings& initialize_timings() const {
+    return initialize_timings_;
+  }
+
  protected:
   void CreateAudioDeviceModule_w();
 
@@ -125,6 +148,9 @@ class RTCPeerConnectionFactoryImpl : public RTCPeerConnectionFactory {
   std::unique_ptr<webrtc::TaskQueueFactory> task_queue_factory_;
   std::unique_ptr<webrtc::VideoEncoderFactory> custom_encoder_factory_;
   webrtc::VideoEncoderFactory* custom_encoder_factory_ptr_ = nullptr;  // Non-owning pointer
+  webrtc::AudioDeviceModule::AudioLayer audio_layer_ =
+      webrtc::AudioDeviceModule::kPlatformDefaultAudio;
+  InitializeTimings initialize_timings_;
 };
 
 }  // namespace libwebrtc
