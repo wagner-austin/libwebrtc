@@ -14,6 +14,7 @@
 #include "api/video/nv12_buffer.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_rotation.h"
+#include "api/video_codecs/builtin_video_decoder_factory.h"
 #include "api/video_codecs/sdp_video_format.h"
 #include "base/refcountedobject.h"
 #include "rtc_base/ref_counted_object.h"
@@ -95,7 +96,6 @@ struct lwrtc_factory {
   owt::base::PassthroughVideoEncoderFactory* passthrough_factory = nullptr;
   lwrtc_video_codec_t passthrough_codec = LWRTC_VIDEO_CODEC_H264;
   bool use_passthrough = false;
-  bool use_dummy_audio_device = false;
   // LibWebRTC::Initialize() inside lwrtc_factory_initialize().
   int64_t ssl_us = 0;
   std::optional<webrtc::CodecParameterMap> hevc_parameters;
@@ -280,11 +280,6 @@ int lwrtc_factory_initialize(lwrtc_factory_t* factory) {
     return 0;
   }
 
-  if (factory->use_dummy_audio_device) {
-    static_cast<libwebrtc::RTCPeerConnectionFactoryImpl*>(factory->handle.get())
-        ->UseDummyAudioDevice();
-  }
-
   // If passthrough mode is enabled, set the custom encoder factory
   if (factory->use_passthrough) {
     // Get the underlying implementation to set the encoder factory
@@ -311,6 +306,12 @@ int lwrtc_factory_initialize(lwrtc_factory_t* factory) {
       }
       factory->passthrough_factory = passthrough_factory.get();
       impl->SetVideoEncoderFactory(std::move(passthrough_factory));
+      // A passthrough factory sends pre-encoded video and decodes none, so it
+      // never needs the Intel Media SDK decoder factory, whose capability
+      // probe (MediaCapabilities::Get) loads libmfx and its threads and
+      // crashed inside libmfx64-gen when it was the first Media SDK user of a
+      // process (austinpc, 2026-10-03).
+      impl->SetVideoDecoderFactory(webrtc::CreateBuiltinVideoDecoderFactory());
     } else {
       factory->passthrough_factory = nullptr;
     }
@@ -336,18 +337,6 @@ int lwrtc_factory_enable_passthrough(
   }
   factory->use_passthrough = true;
   factory->passthrough_codec = codec;
-  return 1;
-}
-
-int lwrtc_factory_use_dummy_audio_device(lwrtc_factory_t* factory) {
-  if (!factory) {
-    return 0;
-  }
-  if (factory->handle) {
-    // Already initialized - the audio device is chosen at initialization
-    return 0;
-  }
-  factory->use_dummy_audio_device = true;
   return 1;
 }
 

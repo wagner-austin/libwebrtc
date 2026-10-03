@@ -8,8 +8,8 @@
 #include "api/media_stream_interface.h"
 #include "api/peer_connection_interface.h"
 #include "api/task_queue/task_queue_factory.h"
+#include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
-#include "modules/audio_device/include/audio_device.h"
 #include "rtc_audio_device_impl.h"
 #include "rtc_audio_processing_impl.h"
 #include "rtc_base/thread.h"
@@ -92,12 +92,11 @@ class RTCPeerConnectionFactoryImpl : public RTCPeerConnectionFactory {
   // Get the custom video encoder factory (if set).
   webrtc::VideoEncoderFactory* GetVideoEncoderFactory();
 
-  // Builds the factory over webrtc's dummy audio device instead of the
-  // platform one (Windows Core Audio), for a caller that plays nothing and
-  // pushes its own captured audio through a kCustom audio source. The dummy
-  // device opens no audio endpoint, at Initialize() or when an audio stream
-  // is added. Must be called before Initialize().
-  void UseDummyAudioDevice();
+  // Set the video decoder factory in place of the default one (Intel Media
+  // SDK when built with it). Must be called before Initialize(). The factory
+  // takes ownership of the decoder factory.
+  void SetVideoDecoderFactory(
+      std::unique_ptr<webrtc::VideoDecoderFactory> factory);
 
   // How long each step of Initialize() took, in microseconds. All zero until
   // Initialize() has run; a step Initialize() skipped stays zero.
@@ -148,8 +147,7 @@ class RTCPeerConnectionFactoryImpl : public RTCPeerConnectionFactory {
   std::unique_ptr<webrtc::TaskQueueFactory> task_queue_factory_;
   std::unique_ptr<webrtc::VideoEncoderFactory> custom_encoder_factory_;
   webrtc::VideoEncoderFactory* custom_encoder_factory_ptr_ = nullptr;  // Non-owning pointer
-  webrtc::AudioDeviceModule::AudioLayer audio_layer_ =
-      webrtc::AudioDeviceModule::kPlatformDefaultAudio;
+  std::unique_ptr<webrtc::VideoDecoderFactory> custom_decoder_factory_;
   InitializeTimings initialize_timings_;
 };
 

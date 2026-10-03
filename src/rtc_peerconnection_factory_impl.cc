@@ -74,8 +74,7 @@ bool RTCPeerConnectionFactoryImpl::Initialize() {
     initialize_timings_.audio_device_create_us =
         rtc::TimeMicros() - create_start_us;
     if (!audio_device_module_) {
-      RTC_LOG(LS_ERROR) << "Failed to create the audio device module (layer "
-                        << static_cast<int>(audio_layer_) << ")";
+      RTC_LOG(LS_ERROR) << "Failed to create the platform audio device module";
       Terminate();
       return false;
     }
@@ -89,9 +88,8 @@ bool RTCPeerConnectionFactoryImpl::Initialize() {
     initialize_timings_.audio_device_init_us =
         rtc::TimeMicros() - init_start_us;
     if (init_result != 0) {
-      RTC_LOG(LS_ERROR) << "Failed to initialize the audio device module "
-                        << "(layer " << static_cast<int>(audio_layer_)
-                        << "): " << init_result;
+      RTC_LOG(LS_ERROR) << "Failed to initialize the platform audio device "
+                        << "module: " << init_result;
       Terminate();
       return false;
     }
@@ -124,11 +122,15 @@ bool RTCPeerConnectionFactoryImpl::Initialize() {
 
     // Determine which video decoder factory to use
     std::unique_ptr<webrtc::VideoDecoderFactory> decoder_factory;
+    if (custom_decoder_factory_) {
+      decoder_factory = std::move(custom_decoder_factory_);
+    } else {
 #if defined(USE_INTEL_MEDIA_SDK)
-    decoder_factory = CreateIntelVideoDecoderFactory();
+      decoder_factory = CreateIntelVideoDecoderFactory();
 #else
-    decoder_factory = webrtc::CreateBuiltinVideoDecoderFactory();
+      decoder_factory = webrtc::CreateBuiltinVideoDecoderFactory();
 #endif
+    }
 
     rtc_peerconnection_factory_ = CreatePeerConnectionFactory(
         network_thread_.get(), worker_thread_.get(), signaling_thread_.get(),
@@ -165,7 +167,8 @@ bool RTCPeerConnectionFactoryImpl::Terminate() {
 void RTCPeerConnectionFactoryImpl::CreateAudioDeviceModule_w() {
   if (!audio_device_module_)
     audio_device_module_ = webrtc::AudioDeviceModule::Create(
-        audio_layer_, task_queue_factory_.get());
+        webrtc::AudioDeviceModule::kPlatformDefaultAudio,
+        task_queue_factory_.get());
 }
 
 void RTCPeerConnectionFactoryImpl::DestroyAudioDeviceModule_w() {
@@ -433,8 +436,9 @@ webrtc::VideoEncoderFactory* RTCPeerConnectionFactoryImpl::GetVideoEncoderFactor
   return custom_encoder_factory_ptr_;
 }
 
-void RTCPeerConnectionFactoryImpl::UseDummyAudioDevice() {
-  audio_layer_ = webrtc::AudioDeviceModule::kDummyAudio;
+void RTCPeerConnectionFactoryImpl::SetVideoDecoderFactory(
+    std::unique_ptr<webrtc::VideoDecoderFactory> factory) {
+  custom_decoder_factory_ = std::move(factory);
 }
 
 }  // namespace libwebrtc
